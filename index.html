@@ -6,26 +6,67 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Flappy Bird — HTML5</title>
   <style>
-    :root{--bg:#70c5ce;--ground:#ded895;--bird:#ffdd57;--pipe:#2ea44f}
+    :root{
+      --bg:#70c5ce;--ground:#ded895;--bird:#ffdd57;--pipe:#2ea44f;
+      --menu-bg:linear-gradient(180deg,#9be2fe,#67d1fb);
+      --btn-bg:linear-gradient(180deg,#ffdd57,#ffb347);
+      --btn-hover:linear-gradient(180deg,#ffe87a,#ffc55b);
+    }
     *{box-sizing:border-box}
-    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial}
-    body{display:flex;align-items:center;justify-content:center;background:linear-gradient(#a0e9ff,#70c5ce);padding:12px}
-    .game-wrap{width:100%;max-width:480px;background:transparent}
-    canvas{display:block;width:100%;height:auto;border-radius:8px;box-shadow:0 8px 30px rgba(15,30,40,0.18)}
-    .hint{position:relative;margin-top:8px;color:#033; text-align:center}
-    .credits{font-size:12px;color:rgba(0,0,0,0.45);text-align:center;margin-top:6px}
+    html,body{height:100%;margin:0;font-family:'Segoe UI',Roboto,Arial,sans-serif;}
+    body{display:flex;align-items:center;justify-content:center;background:var(--bg);padding:12px;overflow:hidden;}
+    .game-wrap{width:100%;max-width:480px;position:relative;}
+    canvas{display:block;width:100%;height:auto;border-radius:8px;box-shadow:0 8px 30px rgba(15,30,40,0.18)}/* ===== Меню ===== */
+#menu{
+  position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;
+  background:var(--menu-bg);z-index:10;transition:opacity .6s ease,transform .6s ease;
+}
+#menu.hide{opacity:0;pointer-events:none;transform:scale(1.1);}
+#menu h1{
+  font-size:2.4rem;color:#045;text-shadow:0 3px 6px rgba(0,0,0,0.2);margin-bottom:1.2rem;
+}
+.menu-row{display:flex;gap:10px;margin-bottom:12px}
+.menu-btn{
+  background:var(--btn-bg);border:none;color:#222;font-weight:600;font-size:1.0rem;
+  padding:10px 20px;margin:6px;border-radius:50px;cursor:pointer;box-shadow:0 6px 12px rgba(0,0,0,0.12);
+  transition:transform .18s,box-shadow .18s,background .18s;
+}
+.menu-btn:hover{background:var(--btn-hover);transform:translateY(-2px);box-shadow:0 8px 18px rgba(0,0,0,0.16)}
+.hint,.credits{text-align:center;color:#033;margin-top:8px;}
+.credits{font-size:12px;color:rgba(0,0,0,0.45)}
+
+/* small UI for music state */
+.small{font-size:0.9rem;padding:8px 14px}
+
   </style>
 </head>
 <body>
   <div class="game-wrap">
     <canvas id="game"></canvas>
-    <div class="hint">Нажмите пробел или тапните по экрану, чтобы лететь. Нажмите R чтобы перезапустить.</div>
-    <div class="credits">Простой клон Flappy Bird — можно сохранить как файл .html и открыть в браузере</div>
+    <div id="menu">
+      <h1>Flappy Bird</h1>
+      <div class="menu-row">
+        <button class="menu-btn" id="startBtn">Играть</button>
+        <button class="menu-btn" id="helpBtn">Помощь</button>
+      </div>
+      <div class="menu-row">
+        <button class="menu-btn" id="recordsBtn">Рекорды</button>
+        <button class="menu-btn small" id="musicBtn">🔊 Музыка: —</button>
+      </div>
+    </div>
+    <div class="hint">Пробел / тап — лететь, R — перезапуск</div>
+    <div class="credits">Сделано с ❤️ — офлайн звуки через WebAudio</div>
   </div><script>
 (() => {
-  // Canvas setup with DPR scaling
+  // Canvas + UI elements
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
+  const menu = document.getElementById('menu');
+  const startBtn = document.getElementById('startBtn');
+  const helpBtn = document.getElementById('helpBtn');
+  const recordsBtn = document.getElementById('recordsBtn');
+  const musicBtn = document.getElementById('musicBtn');
+
   function resize() {
     const cssW = Math.min(480, window.innerWidth - 24);
     const cssH = Math.max(600, Math.round(cssW * (800/480)));
@@ -41,213 +82,140 @@
 
   // Game variables
   const G = {gravity: 0.55, jump: -9, pipeSpeed: 2.2};
-  let state = 'start'; // 'start' | 'playing' | 'gameover'
-  let score = 0;
+  let state = 'menu'; // menu | start | playing | gameover
+  let score = 0, best = +localStorage.getItem('flappy_best')||0;
 
-  const bird = {
-    x: 80,
-    y: 200,
-    r: 14,
-    vy: 0,
-    rotation: 0
-  };
+  const bird = {x:80,y:200,r:14,vy:0,rotation:0};
+  let pipes = [], frame = 0;
+  const pipeInterval = 95, pipeWidth = 64;
 
-  let pipes = [];
-  let frame = 0;
-  const pipeInterval = 95; // frames between pipes
-  const pipeWidth = 64;
-
-  function reset() {
-    bird.y = canvas.height/4;
-    bird.vy = 0;
-    bird.rotation = 0;
-    pipes = [];
-    score = 0;
-    frame = 0;
-    state = 'start';
+  function reset(){
+    bird.y = canvas.height/4;bird.vy=0;bird.rotation=0;
+    pipes=[];score=0;frame=0;state='start';
+  }
+  function spawnPipe(){
+    const ch=parseFloat(canvas.style.height);
+    const gap=Math.max(110,Math.round(ch*0.18));
+    const minTop=40,maxTop=ch-gap-80;
+    const top=Math.floor(Math.random()*(maxTop-minTop+1))+minTop;
+    pipes.push({x:canvas.width/(window.devicePixelRatio||1)+10,top,gap,width:pipeWidth,passed:false});
+  }
+  function circleRectCollide(cx,cy,r,rx,ry,rw,rh){
+    const closestX=Math.max(rx,Math.min(cx,rx+rw));
+    const closestY=Math.max(ry,Math.min(cy,ry+rh));
+    const dx=cx-closestX,dy=cy-closestY;return dx*dx+dy*dy<=r*r;
   }
 
-  function spawnPipe() {
-    const ch = parseFloat(canvas.style.height);
-    const gap = Math.max(110, Math.round(ch * 0.18));
-    const minTop = 40;
-    const maxTop = ch - gap - 80;
-    const top = Math.floor(Math.random() * (maxTop - minTop + 1)) + minTop;
-    pipes.push({x: canvas.width / (window.devicePixelRatio||1) + 10, top, gap, width: pipeWidth, passed: false});
-  }
+  // ===== Sound system (WebAudio) - offline, lightweight =====
+  const AudioEngine = (() => {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    let musicNode = null, musicGain=null;
+    let enabled = localStorage.getItem('flappy_music_enabled');
+    enabled = enabled === null ? true : (enabled === '1');
 
-  function circleRectCollide(cx, cy, r, rx, ry, rw, rh) {
-    // Find closest point
-    const closestX = Math.max(rx, Math.min(cx, rx + rw));
-    const closestY = Math.max(ry, Math.min(cy, ry + rh));
-    const dx = cx - closestX;
-    const dy = cy - closestY;
-    return (dx*dx + dy*dy) <= r*r;
-  }
+    function setMusicButton() { musicBtn.textContent = enabled ? '🔊 Музыка: Вкл' : '🔈 Музыка: Выкл'; }
+    setMusicButton();
 
-  function update() {
+    // small helper to play short oscillator burst (sfx)
+    function playTone(freq, type='sine', time=0.08, gain=0.14) {
+      if (!enabled) return;
+      try {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = type; o.frequency.value = freq;
+        g.gain.value = gain;
+        o.connect(g); g.connect(ctx.destination);
+        const now = ctx.currentTime;
+        o.start(now);
+        g.gain.setValueAtTime(gain, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + time);
+        o.stop(now + time + 0.02);
+      } catch (e) { /* silent */ }
+    }
+
+    // flap sound — short high click
+    function flap(){ playTone(880,'square',0.06,0.12); }
+    // point sound — two quick tones
+    function point(){ playTone(1200,'sine',0.06,0.12); setTimeout(()=>playTone(1500,'sine',0.06,0.09),70); }
+    // hit sound — low damped buzz
+    function hit(){ playTone(180,'sawtooth',0.18,0.18); }
+
+    // simple looped background "music" created from oscillators and periodic notes
+    function startMusic(){
+      if (musicNode) return; // already playing
+      if (!enabled) return;
+      musicGain = ctx.createGain(); musicGain.gain.value = 0.08; musicGain.connect(ctx.destination);
+      // create a small repeated melodic pattern using BufferSource
+      const len = 2; // seconds
+      const sampleRate = ctx.sampleRate;
+      const buffer = ctx.createBuffer(1, sampleRate * len, sampleRate);
+      const data = buffer.getChannelData(0);
+      // fill buffer with a gentle arpeggio-like pattern
+      for (let i=0;i<data.length;i++){
+        const t = i / sampleRate;
+        // three sine components to make it richer
+        data[i] = 0.12*Math.sin(2*Math.PI*220*t)*(1+0.5*Math.sin(2*Math.PI*1.5*t))
+                + 0.06*Math.sin(2*Math.PI*440*t)*Math.sin(2*Math.PI*0.25*t)
+                + 0.03*Math.sin(2*Math.PI*660*t)*Math.sin(2*Math.PI*0.5*t);
+      }
+      musicNode = ctx.createBufferSource();
+      musicNode.buffer = buffer; musicNode.loop = true; musicNode.connect(musicGain); musicNode.start(0);
+    }
+    function stopMusic(){ if (musicNode){ musicNode.stop(); musicNode.disconnect(); musicNode = null; } }
+
+    function toggle() { enabled = !enabled; localStorage.setItem('flappy_music_enabled', enabled ? '1' : '0'); setMusicButton(); if(enabled) startMusic(); else stopMusic(); }
+    // start music automatically if enabled
+    if (enabled) startMusic();
+
+    return {flap,point,hit,toggle,ctx,isEnabled:()=>enabled,setMusicButton};
+  })();
+
+  // ===== Game logic =====
+  function update(){
     frame++;
-    if (state === 'playing') {
-      // bird physics
-      bird.vy += G.gravity;
-      bird.y += bird.vy;
-      bird.rotation = Math.max(Math.min(bird.vy * 3, 45), -45);
-
-      // pipes
-      for (let p of pipes) {
-        p.x -= G.pipeSpeed;
-        // scoring
-        if (!p.passed && p.x + p.width < bird.x - bird.r) {
-          p.passed = true;
-          score++;
-        }
-      }
-      // remove offscreen
-      pipes = pipes.filter(p => p.x + p.width > -20);
-
-      // spawn
-      if (frame % pipeInterval === 0) spawnPipe();
-
-      // collisions
-      // ground and ceiling
-      const ch = canvas.height / (window.devicePixelRatio||1);
-      if (bird.y + bird.r >= ch - 12 || bird.y - bird.r <= 0) {
-        state = 'gameover';
-      }
-      for (let p of pipes) {
-        // top pipe rect
-        const rx = p.x;
-        const rw = p.width;
-        const topRect = {x: rx, y: 0, w: rw, h: p.top};
-        const botRect = {x: rx, y: p.top + p.gap, w: rw, h: ch - (p.top + p.gap)};
-        if (circleRectCollide(bird.x, bird.y, bird.r, topRect.x, topRect.y, topRect.w, topRect.h)
-          || circleRectCollide(bird.x, bird.y, bird.r, botRect.x, botRect.y, botRect.w, botRect.h)) {
-          state = 'gameover';
-        }
-      }
-
-    } else if (state === 'start') {
-      // gentle bob
-      bird.vy = Math.sin(frame/10) * 0.7;
-      bird.y += bird.vy;
-      bird.rotation = Math.sin(frame/10) * 6;
-      if (frame % pipeInterval === 0) spawnPipe();
-      for (let p of pipes) p.x -= G.pipeSpeed/2;
-      pipes = pipes.filter(p => p.x + p.width > -20);
+    if(state==='playing'){
+      bird.vy+=G.gravity;bird.y+=bird.vy;
+      bird.rotation=Math.max(Math.min(bird.vy*3,45),-45);
+      for(let p of pipes){p.x-=G.pipeSpeed; if(!p.passed && p.x + p.width < bird.x - bird.r){ p.passed = true; score++; AudioEngine.point(); if(score>best){best=score;localStorage.setItem('flappy_best',best);} }}
+      pipes = pipes.filter(p=>p.x + p.width > -20);
+      if(frame%pipeInterval===0) spawnPipe();
+      const ch = canvas.height/(window.devicePixelRatio||1);
+      if(bird.y+bird.r>=ch-12 || bird.y-bird.r<=0) { state='gameover'; AudioEngine.hit(); }
+      for(let p of pipes){ if(circleRectCollide(bird.x,bird.y,bird.r,p.x,0,p.width,p.top) || circleRectCollide(bird.x,bird.y,bird.r,p.x,p.top+p.gap,p.width,ch-(p.top+p.gap))){ state='gameover'; AudioEngine.hit(); } }
+    } else if(state==='start'){
+      bird.vy = Math.sin(frame/10)*0.7; bird.y += bird.vy; bird.rotation = Math.sin(frame/10)*6;
+      if(frame%pipeInterval===0) spawnPipe(); for(let p of pipes) p.x -= G.pipeSpeed/2; pipes = pipes.filter(p=>p.x+p.width>-20);
     }
   }
-
-  function draw() {
-    const w = canvas.width / (window.devicePixelRatio||1);
-    const h = canvas.height / (window.devicePixelRatio||1);
-    // background
-    ctx.clearRect(0,0,w,h);
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg') || '#70c5ce';
-    ctx.fillRect(0,0,w,h);
-
-    // pipes
-    for (let p of pipes) {
-      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--pipe') || '#2ea44f';
-      // top
-      ctx.fillRect(p.x, 0, p.width, p.top);
-      // bottom
-      ctx.fillRect(p.x, p.top + p.gap, p.width, h - (p.top + p.gap));
-      // caps (rounded)
-      ctx.fillStyle = '#1f8a3a';
-      ctx.fillRect(p.x, p.top - 8, p.width, 8);
-      ctx.fillRect(p.x, p.top + p.gap, p.width, 8);
-    }
-
-    // ground
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ground') || '#ded895';
-    ctx.fillRect(0, h-12, w, 12);
-
-    // bird (circle with beak and eye)
-    ctx.save();
-    ctx.translate(bird.x, bird.y);
-    ctx.rotate(bird.rotation * Math.PI / 180);
-    // body
-    ctx.beginPath();
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bird') || '#ffdd57';
-    ctx.arc(0,0,bird.r,0,Math.PI*2);
-    ctx.fill();
-    // wing (simple)
-    ctx.beginPath();
-    ctx.ellipse(-2, 2, 8, 5, Math.PI/6, 0, Math.PI*2);
-    ctx.fillStyle = '#f0c94a';
-    ctx.fill();
-    // eye
-    ctx.beginPath();
-    ctx.fillStyle = '#222';
-    ctx.arc(6, -4, 3, 0, Math.PI*2);
-    ctx.fill();
-    // beak
-    ctx.beginPath();
-    ctx.fillStyle = '#ff8b2b';
-    ctx.moveTo(bird.r, -3);
-    ctx.lineTo(bird.r + 12, 0);
-    ctx.lineTo(bird.r, 6);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-
-    // score
-    ctx.fillStyle = '#073642';
-    ctx.font = 'bold 34px system-ui, Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(score, w/2, 60);
-
-    // messages
-    ctx.fillStyle = 'rgba(5,10,15,0.85)';
-    ctx.font = '16px system-ui, Arial';
-    ctx.textAlign = 'center';
-    if (state === 'start') {
-      ctx.fillText('Нажмите пробел или тапните — чтобы начать', w/2, h/2 - 20);
-    }
-    if (state === 'gameover') {
-      ctx.fillStyle = 'rgba(0,0,0,0.75)';
-      ctx.font = '26px system-ui, Arial';
-      ctx.fillText('Игра окончена', w/2, h/2 - 10);
-      ctx.font = '16px system-ui, Arial';
-      ctx.fillText('Нажмите пробел или тапните чтобы перезапустить', w/2, h/2 + 20);
-      ctx.fillText('Ваш счёт: ' + score, w/2, h/2 + 46);
-    }
+  function draw(){
+    const w = canvas.width/(window.devicePixelRatio||1), h = canvas.height/(window.devicePixelRatio||1);
+    ctx.clearRect(0,0,w,h); ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg'); ctx.fillRect(0,0,w,h);
+    for(let p of pipes){ ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--pipe'); ctx.fillRect(p.x,0,p.width,p.top); ctx.fillRect(p.x,p.top+p.gap,p.width,h-(p.top+p.gap)); ctx.fillStyle='#1f8a3a'; ctx.fillRect(p.x,p.top-8,p.width,8); ctx.fillRect(p.x,p.top+p.gap,p.width,8); }
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ground'); ctx.fillRect(0,h-12,w,12);
+    ctx.save(); ctx.translate(bird.x,bird.y); ctx.rotate(bird.rotation*Math.PI/180);
+    ctx.beginPath(); ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bird'); ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(-2,2,8,5,Math.PI/6,0,Math.PI*2); ctx.fillStyle='#f0c94a'; ctx.fill(); ctx.beginPath(); ctx.fillStyle='#222'; ctx.arc(6,-4,3,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.fillStyle='#ff8b2b'; ctx.moveTo(bird.r,-3); ctx.lineTo(bird.r+12,0); ctx.lineTo(bird.r,6); ctx.closePath(); ctx.fill(); ctx.restore();
+    ctx.fillStyle='#073642'; ctx.font='bold 34px system-ui,Arial'; ctx.textAlign='center'; ctx.fillText(score,w/2,60);
+    ctx.fillStyle='rgba(5,10,15,0.85)'; ctx.font='16px system-ui,Arial';
+    if(state==='start') ctx.fillText('Нажмите пробел или тапните, чтобы начать', w/2, h/2 - 20);
+    if(state==='gameover'){ ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.font='26px system-ui,Arial'; ctx.fillText('Игра окончена', w/2, h/2 - 10); ctx.font='16px system-ui,Arial'; ctx.fillText('Нажмите пробел или тапните, чтобы перезапустить', w/2, h/2 + 20); ctx.fillText('Ваш счёт: '+score+' | Рекорд: '+best, w/2, h/2 + 46); }
   }
+  function loop(){ update(); draw(); requestAnimationFrame(loop); }
 
-  function loop() {
-    update();
-    draw();
-    requestAnimationFrame(loop);
-  }
-
-  function flap() {
-    bird.vy = G.jump;
-    if (state === 'start') {
-      state = 'playing';
-      // clear pipes and spawn fresh
-      pipes = []; frame = 0; score = 0;
-    }
-    if (state === 'gameover') {
-      reset();
-      return;
-    }
-  }
+  function flap(){ bird.vy = G.jump; if(state==='start'){ state='playing'; pipes=[]; frame=0; score=0; } if(state==='gameover'){ reset(); } AudioEngine.flap(); }
 
   // input
-  window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') { e.preventDefault(); flap(); }
-    if (e.key === 'r' || e.key === 'R') reset();
-  });
-  canvas.addEventListener('mousedown', (e) => {
-    e.preventDefault(); if (state === 'gameover') reset(); else flap();
-  });
-  canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault(); if (state === 'gameover') reset(); else flap();
-  }, {passive:false});
+  window.addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); flap(); } if (e.key === 'r' || e.key === 'R') reset(); });
+  canvas.addEventListener('mousedown', (e) => { e.preventDefault(); if (state === 'gameover') reset(); else flap(); });
+  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); if (state === 'gameover') reset(); else flap(); }, {passive:false});
 
-  // start
-  reset();
-  loop();
+  // UI buttons
+  startBtn.onclick = ()=>{ menu.classList.add('hide'); state='start'; };
+  helpBtn.onclick = ()=>{ alert('Управление:\n• Пробел или тап — взмах\n• Не врезайтесь в трубы\n• R — перезапуск'); };
+  recordsBtn.onclick = ()=>{ alert('Ваш рекорд: '+best); };
+  musicBtn.onclick = ()=>{ AudioEngine.toggle(); };
+
+  // initialize
+  reset(); loop();
 })();
 </script></body>
 </html>
