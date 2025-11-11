@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Flappy Bird — HTML5</title>
+  <title>Flappy Bird .by Parsiva</title>
   <style>
     :root{
       --bg:#70c5ce;--ground:#ded895;--bird:#ffdd57;--pipe:#2ea44f;
@@ -94,7 +94,7 @@
     pipes=[];score=0;frame=0;state='start';
   }
   function spawnPipe(){
-    const ch=parseFloat(canvas.style.height);
+    const ch = canvas.height / (window.devicePixelRatio || 1);
     const gap=Math.max(110,Math.round(ch*0.18));
     const minTop=40,maxTop=ch-gap-80;
     const top=Math.floor(Math.random()*(maxTop-minTop+1))+minTop;
@@ -219,5 +219,6 @@
 })();
 </script></body>
 </html>
+
 
 
